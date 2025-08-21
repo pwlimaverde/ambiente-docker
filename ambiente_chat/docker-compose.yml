@@ -1,0 +1,141 @@
+services:
+  # PostgreSQL para Evolution API
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-chat
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=evolution
+      - POSTGRES_USER=evolution
+      - POSTGRES_PASSWORD=evolution123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - chat-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis para Evolution API
+  redis:
+    image: redis:7-alpine
+    container_name: redis-chat
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - chat-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Evolution API para WhatsApp
+  evolution-api:
+    image: atendai/evolution-api:v2.1.1
+    container_name: evolution-api-chat
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Configuração de autenticação
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
+      
+      # Configuração do webhook global
+      - WEBHOOK_GLOBAL_URL=${WEBHOOK_GLOBAL_URL:-http://host.docker.internal:8000/oraculo/webhook_whatsapp/}
+      - WEBHOOK_GLOBAL_ENABLED=true
+      - WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=false
+      
+      # Configuração do banco de dados PostgreSQL
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evolution:evolution123@postgres:5432/evolution?schema=public
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_UPDATE=true
+      - DATABASE_SAVE_DATA_CONTACTS=true
+      - DATABASE_SAVE_DATA_CHATS=true
+      - DATABASE_SAVE_DATA_LABELS=true
+      - DATABASE_SAVE_DATA_HISTORIC=true
+      
+      # Configuração do Redis Cache
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379/6
+      - CACHE_REDIS_TTL=604800
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      - CACHE_REDIS_SAVE_INSTANCES=false
+      - CACHE_LOCAL_ENABLED=false
+      
+      # Configuração do QR Code
+      - QRCODE_LIMIT=30
+      - QRCODE_COLOR=#198754
+      
+      # Configurações de servidor
+      - SERVER_TYPE=http
+      - SERVER_PORT=8080
+      - SERVER_URL=${SERVER_URL:-http://localhost:8080}
+      
+      # Configurações de log
+      - LOG_LEVEL=ERROR
+      - LOG_COLOR=true
+      - LOG_BAILEYS=error
+      - CONFIG_SESSION_PHONE_VERSION=2.3000.1023204200
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - chat-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Serviço Ollama para LLM local
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-chat
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    networks:
+      - chat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  evolution_instances:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+networks:
+  chat-network:
+    driver: bridge
+    name: chat-network
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
