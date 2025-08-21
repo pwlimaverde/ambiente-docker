@@ -38,8 +38,27 @@ docker-compose down
 echo [3/4] Baixando imagens Docker...
 docker-compose pull
 
-echo [4/4] Iniciando servicos...
+echo [4/5] Iniciando servicos...
 docker-compose up -d
+
+echo [5/5] Aguardando Ollama e baixando modelo mxbai-embed-large...
+echo Aguardando Ollama ficar disponivel...
+:wait_ollama
+timeout /t 5 /nobreak >nul
+curl -s http://localhost:11434/api/tags >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Ollama ainda nao esta pronto, aguardando...
+    goto wait_ollama
+)
+
+echo Verificando se modelo mxbai-embed-large:latest esta disponivel...
+docker exec ollama-chat ollama list | findstr "mxbai-embed-large" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Baixando modelo mxbai-embed-large:latest...
+    docker exec ollama-chat ollama pull mxbai-embed-large:latest
+) else (
+    echo Modelo mxbai-embed-large:latest ja esta disponivel!
+)
 
 echo.
 echo ========================================
@@ -52,8 +71,14 @@ echo - Ollama: http://localhost:11434
 echo - PostgreSQL: localhost:5432
 echo - Redis: localhost:6379
 echo.
+echo Modelos Ollama instalados:
+echo - mxbai-embed-large:latest (para embeddings)
+echo.
 echo Para verificar o status dos servicos:
 echo   docker-compose ps
+echo.
+echo Para verificar modelos do Ollama:
+echo   docker exec ollama-chat ollama list
 echo.
 echo Para ver os logs:
 echo   docker-compose logs -f
